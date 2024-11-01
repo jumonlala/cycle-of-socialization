@@ -158,7 +158,7 @@ CollideChart.prototype.updateVis = function() {
         .attr("fill", d => d.color)
         .attr("transform", d => `translate(${d.x}, ${d.y})`)
         .transition()
-        .duration(500);
+        .duration(800);
 
     addedNodes.exit().remove();
 };
