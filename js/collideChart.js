@@ -13,7 +13,7 @@ CollideChart = function(_parentElement) {
         .attr("height", height);
     this.nodes = [];
     this.shapes = [d3.symbolCircle, d3.symbolCross, d3.symbolDiamond, d3.symbolSquare, d3.symbolStar, d3.symbolTriangle];
-    this.charges = [-500, -150, -100, 150, 200, -80];
+    this.charges = [-500, -150, -100, -150, -200, -80];
     this.centerRadius = 30; // Radius of central gravitational area
     this.gravityRadius = 100; // Radius within which nodes start orbiting
     this.loadData();
@@ -33,36 +33,42 @@ CollideChart.prototype.loadData = function() {
         return distance > vis.centerRadius;
     });
 
-    if (vis.nodes.length < 100) {
-        for (var i = 0; i < Math.min(3, 100 - vis.nodes.length); i++) {
+    // Ensure we do not exceed the maximum node count
+    if (vis.nodes.length < 200) { // Change to your desired max count
+        for (var i = 0; i < Math.min(3, 30 - vis.nodes.length); i++) {
             var rand = Math.random();
             var randIdx = Math.floor(rand * 6);
-
             var charge = vis.shapes[randIdx] === d3.symbolCircle ? -500 : vis.charges[randIdx];
-            
+
+            // Randomly decide if this node should orbit or move linearly
+            var isOrbitingNode = Math.random() < 0.5; // 50% chance to orbit
+
             // Randomize initial velocities with direction and magnitude
             var angle = Math.random() * 2 * Math.PI;  // Random angle in radians
             var speed = Math.random() * 0.5 + 0.2;    // Random speed, adjust range as needed
             var vx = Math.cos(angle) * speed;
             var vy = Math.sin(angle) * speed;
 
+            // Adjust properties based on node type
             vis.nodes.push({
                 index: vis.nodes.length,
                 x: xScale(rand),
                 y: yScale(rand),
                 radius: 5 + Math.random() * 10,
-                vx: vx,
-                vy: vy,
+                vx: isOrbitingNode ? 0 : vx, // Set to 0 if orbiting for initial setup
+                vy: isOrbitingNode ? 0 : vy, // Set to 0 if orbiting for initial setup
                 color: colorScale(randIdx),
                 path: d3.symbol().type(vis.shapes[randIdx]).size(800)(),
                 charge: charge,
-                orbiting: false
+                orbiting: isOrbitingNode // Track if it's an orbiting node
             });
         }
     }
 
     vis.initVis();
 };
+
+
 
 CollideChart.prototype.ticked = function() {
     var vis = this;
@@ -91,35 +97,42 @@ CollideChart.prototype.ticked = function() {
         var dy = d.y - height / 2;
         var distance = Math.sqrt(dx * dx + dy * dy);
 
-        // Apply gravitational attraction toward the center for all nodes
-        if (!d.orbiting && distance < vis.gravityRadius) {
-            d.orbiting = true; // Mark node as orbiting once it’s within range
-        }
-
+        // Check if the node is orbiting or moving linearly
         if (d.orbiting) {
+            // Calculate gravitational attraction toward the center for orbiting nodes
+            if (distance < vis.gravityRadius) {
+                d.orbiting = true; // Mark node as orbiting once it’s within range
+            }
+
             // Calculate tangential velocity for orbit effect
             var angle = Math.atan2(dy, dx);
-            var tangentialSpeed = 0.02;
+            var tangentialSpeed = 0.02; // Adjust tangential speed as needed
             d.vx = -Math.sin(angle) * tangentialSpeed;
             d.vy = Math.cos(angle) * tangentialSpeed;
 
             // Small radial pull to keep nodes near the orbit radius
-            var radialForce = (vis.gravityRadius - distance) * 0.001;
+            var radialForce = (vis.gravityRadius - distance) * 0.01; // Adjust force multiplier as needed
             d.vx += (dx / distance) * radialForce;
             d.vy += (dy / distance) * radialForce;
+
         } else {
-            // Gravitational pull towards the center before orbiting
-            var gravityStrength = 0.02;
-            d.vx += (width / 2 - d.x) * gravityStrength;
-            d.vy += (height / 2 - d.y) * gravityStrength;
+            // For linear nodes, just update their position based on their velocity
+            // Apply linear velocity without any gravitational influence
+            d.x += d.vx;
+            d.y += d.vy;
         }
+
+        // Update position based on velocity for both types of nodes
+        d.x += d.vx;
+        d.y += d.vy;
     });
 
     // Load more nodes over time
-    if (tickCount % 1000 === 0) {
+    if (tickCount % 2000 === 0) {
         vis.loadData();
     }
 };
+
 
 CollideChart.prototype.initVis = function() {
     var vis = this;
