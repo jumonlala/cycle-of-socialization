@@ -1,10 +1,10 @@
-var width = window.innerWidth; 
-var height = window.innerHeight; 
+var width = window.innerWidth;
+var height = window.innerHeight;
 
 var colorScale = d3.scaleOrdinal(d3.schemeTableau10);
 var xScale = d3.scaleLinear().domain([0, 1]).range([0, width]);
 var yScale = d3.scaleLinear().domain([0, 1]).range([height, 0]);
-var tickCount = 0; 
+var tickCount = 0;
 
 CollideChart = function(_parentElement) {
     this.parentElement = _parentElement;
@@ -12,45 +12,113 @@ CollideChart = function(_parentElement) {
         .attr("width", width)
         .attr("height", height);
     this.nodes = [];
-    this.links = [];
-    this.shapes = [d3.symbolCircle, d3.symbolCross, d3.symbolDiamond, d3.symbolSquare, d3.symbolStar, d3.symbolTriangle, d3.symbolWye];
-    this.charges = [100, -150, -100, 70, -80, 40, -50];
+    this.shapes = [d3.symbolCircle, d3.symbolCross, d3.symbolDiamond, d3.symbolSquare, d3.symbolStar, d3.symbolTriangle];
+    this.charges = [-500, -150, -100, 150, 200, -80];
+    this.centerRadius = 30; // Radius of central gravitational area
+    this.gravityRadius = 100; // Radius within which nodes start orbiting
     this.loadData();
 };
+
+
 
 CollideChart.prototype.loadData = function() {
     var vis = this;
 
-    vis.nodes = vis.nodes.filter(d => d.x >= 5 || d.x <= width - 5 || d.y >= 5 || d.y <= height - 5 || Math.abs(d.x - width/2) > 10 || Math.abs(d.y - height/2) > 10);
+    // Remove nodes too close to center if necessary
+    vis.nodes = vis.nodes.filter(d => {
+        if (d.charge === -500) return true;
+        var dx = d.x - width / 2;
+        var dy = d.y - height / 2;
+        var distance = Math.sqrt(dx * dx + dy * dy);
+        return distance > vis.centerRadius;
+    });
 
-    vis.links = vis.links.filter(d => d.source.x >= 5 || d.source.x <= width - 5 || d.source.y >= 5 || d.source.y <= height - 5
-            || d.target.x >= 5 || d.target.x <= width - 5 || d.target.y >= 5 || d.target.y <= height - 5
-            || Math.abs(d.source.x - width/2) > 10 || Math.abs(d.source.y - height/2) > 10 || Math.abs(d.target.x - width/2) > 10 || Math.abs(d.target.y - height/2) > 10);
-    
-    for (var i = 0; i < tickCount; i++) {
-        var rand = Math.random();
-        var randIdx = Math.floor(rand * 7);
-        vis.nodes.push({
-            index: i,
-            x: xScale(rand),
-            y: yScale(rand),
-            radius: Math.random() * 100 + 100,
-            vx: (randIdx === 0 || randIdx === 3) ? 0 : Math.random() * 20,  // Circles (0) and Squares (3)
-            vy: (randIdx === 0 || randIdx === 3) ? 0 : Math.random() * 20,
-            color: colorScale(Math.random()),
-            path: d3.symbol().type(vis.shapes[randIdx]).size(800)(),
-            charge: vis.charges[randIdx]
-        });
-    }
+    if (vis.nodes.length < 100) {
+        for (var i = 0; i < Math.min(3, 100 - vis.nodes.length); i++) {
+            var rand = Math.random();
+            var randIdx = Math.floor(rand * 6);
 
-    for (var i = 0; i < tickCount/2; i++){
-        vis.links.push({
-            source: Math.floor(Math.random() * vis.nodes.length),
-            target: Math.floor(Math.random() * vis.nodes.length)
-        });
+            var charge = vis.shapes[randIdx] === d3.symbolCircle ? -500 : vis.charges[randIdx];
+            
+            // Randomize initial velocities with direction and magnitude
+            var angle = Math.random() * 2 * Math.PI;  // Random angle in radians
+            var speed = Math.random() * 0.5 + 0.2;    // Random speed, adjust range as needed
+            var vx = Math.cos(angle) * speed;
+            var vy = Math.sin(angle) * speed;
+
+            vis.nodes.push({
+                index: vis.nodes.length,
+                x: xScale(rand),
+                y: yScale(rand),
+                radius: 5 + Math.random() * 10,
+                vx: vx,
+                vy: vy,
+                color: colorScale(randIdx),
+                path: d3.symbol().type(vis.shapes[randIdx]).size(800)(),
+                charge: charge,
+                orbiting: false
+            });
+        }
     }
 
     vis.initVis();
+};
+
+CollideChart.prototype.ticked = function() {
+    var vis = this;
+    tickCount++;
+
+    var addedNodes = vis.svg.selectAll(".node")
+        .data(vis.nodes, d => d.index);
+
+    addedNodes.enter()
+        .append("path")
+        .attr("class", "node")
+        .attr("d", d => d.path)
+        .attr("fill", d => d.color)
+        .attr("transform", d => `translate(${width / 2}, ${height / 2})`)
+        .transition()
+        .duration(500)
+        .attr("transform", d => `translate(${d.x}, ${d.y})`);
+
+    addedNodes.exit().remove();
+
+    vis.svg.selectAll(".node")
+        .attr("transform", d => `translate(${d.x}, ${d.y})`);
+
+    vis.nodes.forEach(d => {
+        var dx = d.x - width / 2;
+        var dy = d.y - height / 2;
+        var distance = Math.sqrt(dx * dx + dy * dy);
+
+        // Apply gravitational attraction toward the center for all nodes
+        if (!d.orbiting && distance < vis.gravityRadius) {
+            d.orbiting = true; // Mark node as orbiting once it’s within range
+        }
+
+        if (d.orbiting) {
+            // Calculate tangential velocity for orbit effect
+            var angle = Math.atan2(dy, dx);
+            var tangentialSpeed = 0.02;
+            d.vx = -Math.sin(angle) * tangentialSpeed;
+            d.vy = Math.cos(angle) * tangentialSpeed;
+
+            // Small radial pull to keep nodes near the orbit radius
+            var radialForce = (vis.gravityRadius - distance) * 0.001;
+            d.vx += (dx / distance) * radialForce;
+            d.vy += (dy / distance) * radialForce;
+        } else {
+            // Gravitational pull towards the center before orbiting
+            var gravityStrength = 0.02;
+            d.vx += (width / 2 - d.x) * gravityStrength;
+            d.vy += (height / 2 - d.y) * gravityStrength;
+        }
+    });
+
+    // Load more nodes over time
+    if (tickCount % 1000 === 0) {
+        vis.loadData();
+    }
 };
 
 CollideChart.prototype.initVis = function() {
@@ -58,31 +126,21 @@ CollideChart.prototype.initVis = function() {
 
     vis.center = vis.svg.append("circle")
         .attr("class", "center")
-        .attr("r", 30)
+        .attr("r", vis.centerRadius)
         .attr("cx", width / 2)
         .attr("cy", height / 2)
         .attr("fill", "purple")
         .attr("opacity", 1);
 
-    vis.ticked = function() {
-        tickCount++;
-        vis.svg.selectAll(".node")
-            .attr("transform", d => `translate(${d.x}, ${d.y})`);
-
-        if (tickCount % 10 === 0) {
-            vis.loadData();
-        }        
-    };
-    
-    // Start the simulation
     var simulation = d3.forceSimulation(vis.nodes)
-        .force("center", d3.forceCenter(width / 2, height / 2)) // Center force
         .force("charge", d3.forceManyBody().strength(d => d.charge))
-        .force("collide", d3.forceCollide().radius(d => d.radius))
-        .force("link", d3.forceLink(vis.links).distance(100))
+        .force("collide", d3.forceCollide().radius(15))
         .alphaTarget(0.3)
         .velocityDecay(0.5)
-        .on("tick", vis.ticked);
+        .on("tick", function() {
+            tickCount++;
+            vis.ticked();
+        });
     
     vis.updateVis();
 };
@@ -98,7 +156,9 @@ CollideChart.prototype.updateVis = function() {
         .attr("class", "node")
         .attr("d", d => d.path)
         .attr("fill", d => d.color)
-        .attr("transform", d => `translate(${d.x}, ${d.y})`); // Initial position
+        .attr("transform", d => `translate(${d.x}, ${d.y})`)
+        .transition()
+        .duration(500);
 
     addedNodes.exit().remove();
 };
